@@ -15,6 +15,7 @@ Example
 -------
 
 .. code-block:: python
+
     from pycopine import Command
     
     class MyCommand(Command):
