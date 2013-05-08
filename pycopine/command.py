@@ -1,24 +1,32 @@
-__all__ = 'CommandMeta Command'.split()
+__all__ =  ['Command', 'CommandMeta']
+__all__ += ['CommandDirectory']
+__all__ += ['CommandError', 'CommandSetupError', 'CommandTypeError', 'CommandNameError']
+
+
 
 def NotImplementedMethod(*a, **ka):
     raise NotImplementedError("Method not implemented")
 
+class CommandError(Exception): pass
+class CommandSetupError(CommandError): pass
 
+class CommandTypeError(CommandSetupError, TypeError): pass
+class CommandNameError(CommandSetupError): pass
 
 class CommandDirectory(object):
     ''' A collection of commands '''
     def __init__(self):
         self.commands = {}
-    
+
     def add_command(self, CommandClass):
         if not issubclass(CommandClass, Command):
-            raise ValueError("Command classes must inherit from Command, or "\
+            raise CommandTypeError("Command classes must inherit from Command, or "\
                              "at least use CommandMeta as their type. %r" % CommandClass)
         name = CommandClass.__name__
         if name in self.commands:
             if self.commands[name] is CommandClass:
                 return
-            raise ValueError("Command names must be unique.")
+            raise CommandNameError("Command names must be unique.")
         self.commands[name] = CommandClass
     
     def __contains__(self, other):
@@ -40,7 +48,7 @@ class CommandMeta(type):
             return super().__new__(mcl, name, bases, dict(ns))
 
         if ns.get('run', NotImplementedMethod) is NotImplementedMethod:
-            raise NotImplementedError()
+            raise NotImplementedError("Commands must implement run().")
 
         cls = super().__new__(mcl, name, bases, dict(ns))
         cls.pycopine_directory.add_command(cls)
