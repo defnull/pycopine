@@ -49,9 +49,6 @@ class CommandGroup(object):
         self.executors = {}
         self.add_executor('default', concurrent.futures.ThreadPoolExecutor(4))
 
-    def submit(self, command):
-        return self.get_executor(command.pool).submit(command._run)
-
     def _register(self, CommandClass):
         assert issubclass(CommandClass, Command)
         assert not isinstance(CommandClass.group, CommandGroup)
@@ -161,7 +158,7 @@ class Command(object, metaclass=CommandMeta):
                 raise CommandIntegrityError("Command submitted twice.")
             if self.__cancelled:
                 raise CommandCancelledError("Submit on cancelled command.")
-            self.__future = self.group.submit(self)
+            self.__future = self.group.get_executor(self.pool).submit(self._run)
             return self
 
     def cancel(self):
