@@ -2,10 +2,18 @@ from pycopine import *
 from nose.tools import raises
 import threading
 
-class TestCommand(object):
 
+
+class CleanupMixin(object):
+    def setUp(self):
+        CommandGroup.clear_all()
+    
     def tearDown(self):
         CommandGroup.clear_all()
+        
+
+
+class TestCommand(CleanupMixin):
 
     @raises(NotImplementedError)
     def test_run_not_implemented(self):
@@ -23,10 +31,8 @@ class TestCommand(object):
             def run(self): pass
 
 
-class TestCommandGroups(object):
 
-    def tearDown(self):
-        CommandGroup.clear_all()
+class TestCommandGroups(CleanupMixin):
 
     def test_default(self):
         class MyCommand(Command):
@@ -59,12 +65,31 @@ class TestCommandGroups(object):
         class MyCommand(Command):
             def run(self): pass
 
+class TestCommandPools(CleanupMixin):
+
+    def test_default(self):
+        class MyCommand(Command):
+            def run(self, value): return value
+        assert MyCommand.pool == 'default'
+        assert MyCommand(5).result() == 5
+
+    def test_explicit(self):
+        class MyCommand(Command):
+            pool = 'default'
+            def run(self, value): return value
+        assert MyCommand.pool == 'default'
+        assert MyCommand(5).result() == 5
+
+    @raises(CommandExecutorNotFoundError)
+    def test_unknown_pool(self):
+        class MyCommand(Command):
+            pool = 'undefined'
+            def run(self, value): return value
+        assert MyCommand.pool == 'undefined'
+        assert MyCommand(5).result() == 5
 
 
-class TestCommandRunnable(object):
-
-    def tearDown(self):
-        CommandGroup.clear_all()
+class TestCommandRunnable(CleanupMixin):
     
     def test_sync_execute(self):
         class MyCommand(Command):
@@ -98,6 +123,39 @@ class TestCommandRunnable(object):
         finally:
             wakeup.set()
 
+    def test_result_twice(self):
+        class MyCommand(Command):
+            def run(self, value): return value
+        
+        cmd = MyCommand(5)
+        assert cmd.result()
+        assert cmd.result()
+
+    @raises(CommandIntegrityError)
+    def test_result_twice(self):
+        class MyCommand(Command):
+            def run(self, value): return value
+        
+        cmd = MyCommand(5)
+        assert cmd.submit()
+        assert cmd.submit()
+
+    @raises(CommandCancelledError)
+    def test_cancle_early(self):
+        class MyCommand(Command):
+            def run(self, value): return value
+        
+        cmd = MyCommand(5)
+        assert cmd.cancel()
+        assert cmd.done()
+        assert cmd.cancelled()
+        assert not cmd.running()
+        cmd.result()
+
+
+
+class TestCommandFallback(CleanupMixin):
+
     def test_fallback(sefl):
         class MyCommand(Command):
             def run(self, value): return 10/value
@@ -124,6 +182,10 @@ class TestCommandRunnable(object):
         assert MyCommand(2).result() == 5
         assert isinstance(MyCommand(0).exception(), ZeroDivisionError)
         assert MyCommand(0).result() # This should throw
+
+
+
+class TestCommandCleanup(CleanupMixin):
 
     def test_cleanup(sefl):
         mutable = []
@@ -173,34 +235,5 @@ class TestCommandRunnable(object):
             def cleanup(self): 1/0
 
         assert MyCommand().result() is None
-
-    def test_result_twice(self):
-        class MyCommand(Command):
-            def run(self, value): return value
-        
-        cmd = MyCommand(5)
-        assert cmd.result()
-        assert cmd.result()
-
-    @raises(CommandIntegrityError)
-    def test_result_twice(self):
-        class MyCommand(Command):
-            def run(self, value): return value
-        
-        cmd = MyCommand(5)
-        assert cmd.submit()
-        assert cmd.submit()
-
-    @raises(CommandCancelledError)
-    def test_cancle_early(self):
-        class MyCommand(Command):
-            def run(self, value): return value
-        
-        cmd = MyCommand(5)
-        assert cmd.cancel()
-        assert cmd.done()
-        assert cmd.cancelled()
-        assert not cmd.running()
-        cmd.result()
 
 

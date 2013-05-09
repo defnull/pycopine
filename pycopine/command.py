@@ -1,10 +1,11 @@
 import concurrent.futures
 import logging
+import threading
 
 __all__ =  ['Command', 'CommandMeta']
 __all__ += ['CommandGroup']
 __all__ += ['CommandError', 'CommandSetupError', 'CommandTypeError',
-            'CommandNameError', 'CommandCancelledError', 'CommandIntegrityError']
+            'CommandNameError', 'CommandCancelledError', 'CommandIntegrityError', 'CommandExecutorNotFoundError']
 
 class NotImplementedCallable(object):
     def __call__(self, *a, **ka):
@@ -21,8 +22,8 @@ class CommandNameError(CommandError): pass
 class CommandCancelledError(concurrent.futures.CancelledError, CommandError): pass
 class CommandTimeoutError(concurrent.futures.TimeoutError, CommandError): pass
 
-
-
+class CommandExecutorError(CommandError): pass
+class CommandExecutorNotFoundError(CommandExecutorError): pass
 
 class CommandGroup(object):
     __instances = dict()
@@ -45,7 +46,8 @@ class CommandGroup(object):
         self.name = name
         self.commands = {}
         self.logger = logging.getLogger(name)
-        self.default_executor = concurrent.futures.ThreadPoolExecutor(4)
+        self.executors = {}
+        self.add_executor('default', concurrent.futures.ThreadPoolExecutor(4))
 
     def submit(self, command):
         return self.get_executor(command.pool).submit(command._run)
@@ -55,15 +57,24 @@ class CommandGroup(object):
         assert not isinstance(CommandClass.group, CommandGroup)
         assert CommandClass.group == self.name
 
-        name = CommandClass.__name__
+        name = CommandClass.name or CommandClass.__name__
         if name in self.commands:
             raise CommandNameError("Command names must be unique per group.")
         self.commands[name] = CommandClass
         CommandClass.group  = self
+        CommandClass.name = name
         CommandClass.logger = self.logger.getChild(name)
 
     def get_executor(self, name):
-        return self.default_executor
+        try:
+            return self.executors[name]
+        except KeyError:
+            msg = "Command executor %r not defined for group %r"
+            msg.format(name, self)
+            raise CommandExecutorNotFoundError(msg)
+
+    def add_executor(self, name, executor):
+        n = self.executors.setdefault(name, executor)
 
     def __contains__(self, other):
         return other in self.commands or other in self.commands.values()
@@ -74,7 +85,8 @@ class CommandGroup(object):
 
 
 class CommandMeta(type):
-    ''' Metaclass for all commands. The magic happens here. '''
+    ''' Metaclass for all commands. Ensures that the command is registered
+        to a command group. '''
 
     @classmethod
     def __prepare__(mcl, name, bases):
@@ -102,10 +114,12 @@ class Command(object, metaclass=CommandMeta):
         made private (prefixed with `__`).
     '''
 
-    #: Command groups share configuration and defaults.
+    #: Command group for this command.
     group = 'default'
-    #: The executor pool that is responsible for this command
+    #: Executor pool responsible for this command.
     pool  = 'default'
+    #: Command name. Defaults to class name.
+    name = None
 
     run = NotImplementedMethod
     fallback = NotImplementedMethod
@@ -115,6 +129,7 @@ class Command(object, metaclass=CommandMeta):
         self.arguments = a, ka
         self.__cancelled = False
         self.__future = None
+        self.__statelock = threading.Lock()
 
     def _run(self):
         a, ka = self.arguments
@@ -141,19 +156,21 @@ class Command(object, metaclass=CommandMeta):
                 log.exception("Command exception: %r", e)
 
     def submit(self):
-        if self.__future:
-            raise CommandIntegrityError("Command submitted twice.")
-        if self.__cancelled:
-            raise CommandCancelledError("Submit on cancelled command.")
-        self.__future = self.group.submit(self)
-        return self
+        with self.__statelock:
+            if self.__future:
+                raise CommandIntegrityError("Command submitted twice.")
+            if self.__cancelled:
+                raise CommandCancelledError("Submit on cancelled command.")
+            self.__future = self.group.submit(self)
+            return self
 
     def cancel(self):
         ''' Attempt to cancel the call. If the call is currently being executed
             and cannot be cancelled then the method will return False, otherwise
             the call will be cancelled and the method will return True. '''
-        self.__cancelled = True
-        return self.__future.cancel() if self.__future else True
+        with self.__statelock:
+            self.__cancelled = True
+            return self.__future.cancel() if self.__future else True
 
     def cancelled(self):
         ''' Return True if the call was successfully cancelled.'''
