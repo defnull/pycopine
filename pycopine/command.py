@@ -5,7 +5,9 @@ import threading
 __all__ =  ['Command', 'CommandMeta']
 __all__ += ['CommandGroup']
 __all__ += ['CommandError', 'CommandSetupError', 'CommandTypeError',
-            'CommandNameError', 'CommandCancelledError', 'CommandIntegrityError', 'CommandExecutorNotFoundError']
+            'CommandNameError', 'CommandCancelledError',
+            'CommandIntegrityError', 'CommandExecutorNotFoundError',
+            'CommandNotFoundError']
 
 class NotImplementedCallable(object):
     def __call__(self, *a, **ka):
@@ -24,6 +26,8 @@ class CommandTimeoutError(concurrent.futures.TimeoutError, CommandError): pass
 
 class CommandExecutorError(CommandError): pass
 class CommandExecutorNotFoundError(CommandExecutorError): pass
+
+class CommandNotFoundError(CommandError): pass
 
 class CommandGroup(object):
     __instances = dict()
@@ -61,6 +65,14 @@ class CommandGroup(object):
         CommandClass.group  = self
         CommandClass.name = name
         CommandClass.logger = self.logger.getChild(name)
+
+    def get_command(self, name):
+        try:
+            return self.commands[name]
+        except KeyError:
+            msg = "Command %r not defined for group %r"
+            msg.format(name, self)
+            raise CommandNotFoundError(msg)
 
     def get_executor(self, name):
         try:
@@ -186,8 +198,8 @@ class Command(object, metaclass=CommandMeta):
     def result(self, timeout=None):
         ''' Return the value returned by run(). If run() failed with an
             exception and fallback() is defined, the the fallback result is
-            returned. If fallback() is not defined or fails too, this method
-            will raise the same exception as run().
+            returned instead. If fallback() is not defined or fails too, this
+            method will raise the same exception as run().
 
             If the call hasn’t yet completed then this method will wait up to
             timeout seconds. If the call hasn’t completed in timeout seconds,

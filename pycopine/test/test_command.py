@@ -1,7 +1,7 @@
 from pycopine import *
 from nose.tools import raises
 import threading
-
+import time
 
 
 class CleanupMixin(object):
@@ -64,6 +64,18 @@ class TestCommandGroups(CleanupMixin):
 
         class MyCommand(Command):
             def run(self): pass
+
+    def test_get_command(self):
+        class MyCommand(Command):
+            def run(self): pass
+        assert MyCommand is MyCommand.group.get_command('MyCommand')
+
+    @raises(CommandNotFoundError)
+    def test_get_command_not_found(self):
+        class MyCommand(Command):
+            def run(self): pass
+        MyCommand.group.get_command('MyOtherCommand')
+
 
 class TestCommandPools(CleanupMixin):
 
@@ -151,7 +163,6 @@ class TestCommandRunnable(CleanupMixin):
         assert cmd.cancelled()
         assert not cmd.running()
         cmd.result()
-
 
 
 class TestCommandFallback(CleanupMixin):
