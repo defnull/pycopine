@@ -14,11 +14,6 @@ Prerequisites
 
 Pycopine requires Python 3.2+, but may be backportet to 2.7 in the future.
 
-Installation
-------------
-
-Pycopine is not released yet.
-
 (Planned) Features
 ------------------
 

@@ -11,7 +11,7 @@ except ImportError:
 
 setup(
     name='pycopine',
-    version='0.1-dev',
+    version='0.1.dev1',
     packages=['pycopine'],
     description='Latency and fault tolerance library inspired by Hystrix.',
     url='https://github.com/defnull/pycopine',
