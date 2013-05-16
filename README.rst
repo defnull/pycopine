@@ -36,8 +36,8 @@ Lets say we want to speak to a remote service that is slow, unreliable or both:
     def crappy_service(input):
         ''' The most useless piece of code ever.'''
         time.sleep(5)
-        if 'OK' != random.choice(['OK', 'OK', 'f**ck']):
-            raise RuntimeError('We broke something.')
+        if 'OK' != random.choice(['OK', 'OK', 'SERVER ON FIRE']):
+            raise RuntimeError('We broke something :(')
         return input
 
 You could throw lots of threads and try/except clauses at the problem and hope
@@ -54,7 +54,7 @@ to not break the internet. Or you could use pycopine:
             return crappy_service(input)
 
         def fallback(self, input):
-            return input
+            return 'some fallback value'
     
     # Run and wait for the result
     result = MyCommand('input').result()
@@ -66,8 +66,8 @@ to not break the internet. Or you could use pycopine:
     MyCommand('input').submit()
     
     # Do stuff in parallel
-    foo = MyCommand('input_a').submit()
-    bar = MyCommand('input_b').submit()
+    foo = MyCommand('input').submit()
+    bar = MyCommand('input').submit()
     results = [foo.result(), bar.result()]
     
     # Change your mind midway through
@@ -75,6 +75,6 @@ to not break the internet. Or you could use pycopine:
     if foobar.wait(timeout=2):
         result = foobar.reault()
     else:
-        foobar.cancel(RuntimeError('No time for this sh**t'))
+        foobar.cancel(RuntimeError('We have no time for this!'))
 
 
