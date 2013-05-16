@@ -7,10 +7,10 @@ import time
 class CleanupMixin(object):
     def setUp(self):
         CommandGroup.clear_all()
-    
+
     def tearDown(self):
         CommandGroup.clear_all()
-        
+
 
 
 class TestCommand(CleanupMixin):
@@ -102,43 +102,47 @@ class TestCommandPools(CleanupMixin):
 
 
 class TestCommandRunnable(CleanupMixin):
-    
+
     def test_sync_execute(self):
         class MyCommand(Command):
             def run(self, value): return value
-        
+
         assert MyCommand(5).result() == 5
         assert MyCommand(6).result() == 6
 
     def test_async_execute(self):
-        wakeup = threading.Event()
+        started = threading.Event()
+        wakeup  = threading.Event()
         try:
             class MyCommand(Command):
                 def run(self, value):
+                    started.set()
                     wakeup.wait()
                     return value
 
-            command = MyCommand(5) 
+            command = MyCommand(5)
             assert not command.running()
-            assert not command.done()
+            assert not command.completed()
 
             future = command.submit()
             assert command is future
+
+            started.wait()
             assert command.running()
-            assert not command.done()
+            assert not command.completed()
 
             wakeup.set()
 
             assert command.result() == 5
             assert not command.running()
-            assert command.done()
+            assert command.completed()
         finally:
             wakeup.set()
 
     def test_result_twice(self):
         class MyCommand(Command):
             def run(self, value): return value
-        
+
         cmd = MyCommand(5)
         assert cmd.result()
         assert cmd.result()
@@ -147,7 +151,7 @@ class TestCommandRunnable(CleanupMixin):
     def test_result_twice(self):
         class MyCommand(Command):
             def run(self, value): return value
-        
+
         cmd = MyCommand(5)
         assert cmd.submit()
         assert cmd.submit()
@@ -155,15 +159,42 @@ class TestCommandRunnable(CleanupMixin):
     @raises(CommandCancelledError)
     def test_cancle_early(self):
         class MyCommand(Command):
-            def run(self, value): return value
-        
-        cmd = MyCommand(5)
+            def run(self):
+                pass
+
+        cmd = MyCommand()
         assert cmd.cancel()
-        assert cmd.done()
+        assert cmd.completed()
         assert cmd.cancelled()
         assert not cmd.running()
-        cmd.result()
+        cmd.submit()
 
+    @raises(CommandTimeoutError)
+    def test_timeout(self):
+        class MyCommand(Command):
+            def run(self, value):
+                time.sleep(1)
+
+        assert not MyCommand(5).result(.1)
+
+    @raises(CommandTimeoutError)
+    def test_timeout_on_exception(self):
+        class MyCommand(Command):
+            def run(self, value):
+                time.sleep(1)
+
+        assert not MyCommand(5).exception(.1)
+
+    def test_timeout_fallback(self):
+        class MyCommand(Command):
+            def run(self, value):
+                time.sleep(1)
+            def fallback(self, e):
+                assert isinstance(e, CommandTimeoutError)
+                return 'fallback'
+
+        cmd = MyCommand(5)
+        assert cmd.result(.1) == 'fallback'
 
 class TestCommandFallback(CleanupMixin):
 
@@ -171,7 +202,7 @@ class TestCommandFallback(CleanupMixin):
         class MyCommand(Command):
             def run(self, value): return 10/value
             def fallback(self, e): return 0
-        
+
         assert MyCommand(2).result() == 5
         assert MyCommand(0).result() == 0
 
@@ -179,7 +210,7 @@ class TestCommandFallback(CleanupMixin):
     def test_no_fallback(sefl):
         class MyCommand(Command):
             def run(self, value): return 10/value
-        
+
         assert MyCommand(2).result() == 5
         assert isinstance(MyCommand(0).exception(), ZeroDivisionError)
         assert MyCommand(0).result() # This should throw
@@ -189,7 +220,7 @@ class TestCommandFallback(CleanupMixin):
         class MyCommand(Command):
             def run(self, value): return 10/value
             def fallback(self, e): raise RuntimeError()
-        
+
         assert MyCommand(2).result() == 5
         assert isinstance(MyCommand(0).exception(), ZeroDivisionError)
         assert MyCommand(0).result() # This should throw
@@ -203,7 +234,7 @@ class TestCommandCleanup(CleanupMixin):
         class MyCommand(Command):
             def run(self): pass
             def cleanup(self): mutable.append(None)
-        
+
         assert not mutable
         MyCommand().result()
         assert mutable
@@ -213,7 +244,7 @@ class TestCommandCleanup(CleanupMixin):
         class MyCommand(Command):
             def run(self): return 1/0
             def cleanup(self): mutable.append(None)
-        
+
         assert not mutable
         assert MyCommand().exception()
         assert mutable
@@ -224,7 +255,7 @@ class TestCommandCleanup(CleanupMixin):
             def run(self): return 1/0
             def fallback(self, e): return 5
             def cleanup(self): mutable.append(None)
-        
+
         assert not mutable
         assert MyCommand().result() == 5
         assert mutable
@@ -235,7 +266,7 @@ class TestCommandCleanup(CleanupMixin):
             def run(self): return 1/0
             def fallback(self, e): return 1/0
             def cleanup(self): mutable.append(None)
-        
+
         assert not mutable
         assert MyCommand().exception()
         assert mutable
