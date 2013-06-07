@@ -73,7 +73,7 @@ to not break the internet. Or you could use pycopine:
     # Change your mind midway through
     foobar = MyCommand('input').submit()
     if foobar.wait(timeout=2):
-        result = foobar.reault()
+        result = foobar.result()
     else:
         foobar.cancel(RuntimeError('We have no time for this!'))
 
