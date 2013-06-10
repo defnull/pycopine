@@ -276,7 +276,7 @@ class Command(object, metaclass=CommandMeta):
     def _run(self):
 
         with self._statelock:
-            assert self._state == PENDING
+            if self._state != PENDING: return
             self._state = RUNNING
 
         run_error, result = None, None
