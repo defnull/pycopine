@@ -10,8 +10,12 @@ Contents:
 
 .. toctree::
    :maxdepth: 2
+   
+.. automodule:: pycopine.command
+   :members:
 
-
+.. automodule:: pycopine.pool
+   :members:
 
 Indices and tables
 ==================

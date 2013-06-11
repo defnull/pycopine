@@ -127,9 +127,9 @@ class Command(object, metaclass=CommandMeta):
     ''' Base class for all user defined commands. The base class implements the
         (public) api of concurrent.futures.Future and adds some other methods.
 
-        Subclasses MUST implement run() and MAY implement fallback() and/or
-        cleanup(). Additional methods or attributes should be avoided or
-        made private (prefixed with `__`).
+        Subclasses MUST implement :meth:`run` and MAY implement :meth:`fallback`
+        and/or :meth:`cleanup`. Additional methods or attributes should be
+        avoided or made private (prefixed with two underscores).
     '''
 
     #: Command group for this command.

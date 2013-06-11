@@ -1,7 +1,10 @@
-.PHONY: clean prepare
+.PHONY: clean prepare docs
 
 prepare: clean
 	tools/fixver.sh
+
+docs:
+	python3 -c 'import sys, sphinx; sys.exit(sphinx.main(sys.argv))' -b html -d build/doctrees docs build/html
 
 clean:
 	-rm -rf build/ dist/ MANIFEST 2>/dev/null
