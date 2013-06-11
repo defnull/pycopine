@@ -1,17 +1,14 @@
 #!/usr/bin/env python
-import sys
-
-extras = {}
+import sys, os.path
+        
 try:
     from setuptools import setup
-    if sys.version_info < (3, 2):
-        extras['install_requires'] = ['futures']
 except ImportError:
     from distutils.core import setup
 
 setup(
     name='pycopine',
-    version='0.1.dev1',
+    version = '0.1-dev', # Do not edit (see VERSION file)
     packages=['pycopine'],
     description='Latency and fault tolerance library inspired by Hystrix.',
     url='https://github.com/defnull/pycopine',
@@ -27,6 +24,5 @@ setup(
         'Programming Language :: Python',
         'Programming Language :: Python :: 3.2',
         'Programming Language :: Python :: 3.3',
-    ],
-    **extras
+    ]
 )

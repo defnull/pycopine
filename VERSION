@@ -1,0 +1,5 @@
+0.1-dev
+
+# The first line of this file MUST contain a valid version string.
+# It is used by tools/fixver.sh to update the version in several files.
+# Possible values (examples): 0.1-dev; 1.2.99;
