@@ -1,12 +1,15 @@
 import time
 import threading
+import atexit
+
+__all__ = ['Pool']
 
 class Pool(object):
     __instances = dict()
 
     def __new__(cls, name='default'):
         if name not in cls.__instances:
-            obj = super(CommandGroup, cls).__new__(cls)
+            obj = super(cls, cls).__new__(cls)
             cls.__instances[name] = obj
         return cls.__instances[name]
 
@@ -25,7 +28,8 @@ class Pool(object):
         self.queue    = []
         self.running  = []
         self.threads  = []
-        self.qlock = threading.Condition()
+        self.qlock = threading.Condition(threading.Lock())
+        atexit.register(self.shutdown)
 
     def get_queue_size(self):
         ''' Return the number of jobs waiting in the queue. '''
@@ -37,31 +41,33 @@ class Pool(object):
 
     def dequeue(self, command):
         with self.qlock:
-            self.queue.remove(command)
+            if command in self.queue:
+                self.queue.remove(command)
     
     def enqueue(self, command):
         with self.qlock:
             if self._shutdown:
-                raise RuntimeError('Queue closed')
+                raise RuntimeError('Pool is closed')
             if len(self.queue) >= self.max_queue_size:
                 raise RuntimeError('Queue full')
-            self.queue.append(item)
+            self.queue.append(command)
             if len(self.threads) < self.max_pool_size:
-                thread = threading.Thread(target=self._runloop)
-                thread.start()
+                thread = threading.Thread(target=self._run_loop)
+                thread.daemon = True
                 self.threads.append(thread)
+                thread.start()
             self.qlock.notify()
 
     def _run_loop(self):
         current_thread = threading.current_thread()
-        while True:
-            try:
+        try:
+            while True:
                 with self.qlock:
-                    if not self.queue:
-                        self.qlock.wait(self.max_worker_idle)
                     if self._shutdown:
                         break
                     if not self.queue:
+                        self.qlock.wait(self.max_worker_idle)
+                    if self._shutdown or not self.queue:
                         break
                     command = self.queue.pop(0)
                 try:
@@ -69,18 +75,15 @@ class Pool(object):
                     command._run()
                 finally:
                     self.running.remove(command)
-            finally:
-                self.threads.remove(current_thread)
+        finally:
+            self.threads.remove(current_thread)
 
-    def shutdown(self):
+    def shutdown(self, block=True):
         with self.qlock:
             self._shutdown = True
-            self.qlock.notifyAll()
+            self.qlock.notify_all()
+        if block:
+            for t in self.threads[:]:
+                t.join()
 
-    @classmethod
-    def shutdown_all(cls):
-        for pool in cls.__instances.items():
-            pool.shutdown()
 
-import atexit
-atexit.register(Pool.shutdown_all)

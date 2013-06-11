@@ -1,6 +1,6 @@
-import concurrent.futures
 import logging
 import threading
+from . import pool
 
 __all__ =  ['Command', 'CommandMeta']
 __all__ += ['CommandGroup']
@@ -30,8 +30,8 @@ class CommandIntegrityError(CommandError): pass
 class CommandTypeError(CommandError, TypeError): pass
 class CommandNameError(CommandError): pass
 
-class CommandCancelledError(concurrent.futures.CancelledError, CommandError): pass
-class CommandTimeoutError(concurrent.futures.TimeoutError, CommandError): pass
+class CommandCancelledError(CommandError): pass
+class CommandTimeoutError(CommandError): pass
 
 class CommandExecutorError(CommandError): pass
 class CommandExecutorNotFoundError(CommandExecutorError): pass
@@ -60,7 +60,7 @@ class CommandGroup(object):
         self.commands = {}
         self.logger = logging.getLogger(name)
         self.executors = {}
-        self.add_executor('default', concurrent.futures.ThreadPoolExecutor(4))
+        self.add_executor(pool.Pool('default'))
 
     def _register(self, CommandClass):
         assert issubclass(CommandClass, Command)
@@ -91,8 +91,8 @@ class CommandGroup(object):
             msg.format(name, self)
             raise CommandExecutorNotFoundError(msg)
 
-    def add_executor(self, name, executor):
-        n = self.executors.setdefault(name, executor)
+    def add_executor(self, executor):
+        n = self.executors.setdefault(executor.name, executor)
 
     def __contains__(self, other):
         return other in self.commands or other in self.commands.values()
@@ -163,7 +163,7 @@ class Command(object, metaclass=CommandMeta):
         self._fallback_result = None
         self._fallback_exception = None
 
-        self.__future = None
+        self.__pool = None
 
     def submit(self):
         ''' Queue the call for execution. '''
@@ -178,7 +178,8 @@ class Command(object, metaclass=CommandMeta):
         with self._statelock:
             if self._state == NEW:
                 self._state = PENDING
-                self.__future = self.group.get_executor(self.pool).submit(self._run)
+                self.__pool = self.group.get_executor(self.pool)
+                self.__pool.enqueue(self)
         return self
 
     def cancel(self, exception=None):
@@ -200,7 +201,7 @@ class Command(object, metaclass=CommandMeta):
                 self._completed.set()
             # Note that future.cancel() MUST be protected with statelock.
             # to prevent _run() from being started in a CANCELLED state.
-            return self.__future.cancel() if self.__future else True
+            return self.__pool.dequeue(self) if self.__pool else True
 
     def cancelled(self):
         ''' Return True if the call was cancelled. '''
@@ -302,5 +303,5 @@ class Command(object, metaclass=CommandMeta):
         try:
             self.cleanup()
         except Exception:
-            log.exception("Command cleanup failed.")
+            self.logger.exception("Command cleanup failed.")
 
