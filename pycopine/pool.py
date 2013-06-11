@@ -28,7 +28,7 @@ class Pool(object):
         self.queue    = []
         self.running  = []
         self.threads  = []
-        self.qlock = threading.Condition(threading.Lock())
+        self.cond = threading.Condition(threading.Lock())
         atexit.register(self.shutdown)
 
     def get_queue_size(self):
@@ -40,12 +40,12 @@ class Pool(object):
         return self.max_queue_size - len(self.queue)
 
     def dequeue(self, command):
-        with self.qlock:
+        with self.cond:
             if command in self.queue:
                 self.queue.remove(command)
     
     def enqueue(self, command):
-        with self.qlock:
+        with self.cond:
             if self._shutdown:
                 raise RuntimeError('Pool is closed')
             if len(self.queue) >= self.max_queue_size:
@@ -56,17 +56,17 @@ class Pool(object):
                 thread.daemon = True
                 self.threads.append(thread)
                 thread.start()
-            self.qlock.notify()
+            self.cond.notify()
 
     def _run_loop(self):
         current_thread = threading.current_thread()
         try:
             while True:
-                with self.qlock:
+                with self.cond:
                     if self._shutdown:
                         break
                     if not self.queue:
-                        self.qlock.wait(self.max_worker_idle)
+                        self.cond.wait(self.max_worker_idle)
                     if self._shutdown or not self.queue:
                         break
                     command = self.queue.pop(0)
@@ -79,9 +79,9 @@ class Pool(object):
             self.threads.remove(current_thread)
 
     def shutdown(self, block=True):
-        with self.qlock:
+        with self.cond:
             self._shutdown = True
-            self.qlock.notify_all()
+            self.cond.notify_all()
         if block:
             for t in self.threads[:]:
                 t.join()
