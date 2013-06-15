@@ -1,4 +1,3 @@
 include pycopine/*.py
 include setup.py
-include setup.cofg
 include README.rst
