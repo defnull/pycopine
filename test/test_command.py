@@ -121,21 +121,21 @@ class TestCommandRunnable(CleanupMixin):
                     return value
 
             command = MyCommand(5)
-            assert not command.running()
-            assert not command.completed()
+            assert not command.is_running()
+            assert not command.is_completed()
 
             future = command.submit()
             assert command is future
 
             started.wait()
-            assert command.running()
-            assert not command.completed()
+            assert command.is_running()
+            assert not command.is_completed()
 
             wakeup.set()
 
             assert command.result() == 5
-            assert not command.running()
-            assert command.completed()
+            assert not command.is_running()
+            assert command.is_completed()
         finally:
             wakeup.set()
 
@@ -147,8 +147,7 @@ class TestCommandRunnable(CleanupMixin):
         assert cmd.result()
         assert cmd.result()
 
-    @raises(CommandIntegrityError)
-    def test_result_twice(self):
+    def test_submit_twice(self):
         class MyCommand(Command):
             def run(self, value): return value
 
@@ -156,7 +155,6 @@ class TestCommandRunnable(CleanupMixin):
         assert cmd.submit()
         assert cmd.submit()
 
-    @raises(CommandCancelledError)
     def test_cancle_early(self):
         class MyCommand(Command):
             def run(self):
@@ -164,10 +162,9 @@ class TestCommandRunnable(CleanupMixin):
 
         cmd = MyCommand()
         assert cmd.cancel()
-        assert cmd.completed()
-        assert cmd.cancelled()
-        assert not cmd.running()
-        cmd.submit()
+        assert cmd.is_completed()
+        assert cmd.is_canceled()
+        assert not cmd.is_running()
 
     @raises(CommandTimeoutError)
     def test_timeout(self):
@@ -177,20 +174,19 @@ class TestCommandRunnable(CleanupMixin):
 
         assert not MyCommand(5).result(.1)
 
-    @raises(CommandTimeoutError)
     def test_timeout_on_exception(self):
         class MyCommand(Command):
             def run(self, value):
                 time.sleep(1)
 
-        assert not MyCommand(5).exception(.1)
+        assert isinstance(MyCommand(5).exception(.1), CommandTimeoutError)
 
     def test_timeout_fallback(self):
         class MyCommand(Command):
             def run(self, value):
                 time.sleep(1)
-            def fallback(self, e):
-                assert isinstance(e, CommandTimeoutError)
+            def fallback(self, value):
+                assert isinstance(self.exception(), CommandTimeoutError)
                 return 'fallback'
 
         cmd = MyCommand(5)
@@ -201,7 +197,7 @@ class TestCommandFallback(CleanupMixin):
     def test_fallback(sefl):
         class MyCommand(Command):
             def run(self, value): return 10/value
-            def fallback(self, e): return 0
+            def fallback(self, value): return 0
 
         assert MyCommand(2).result() == 5
         assert MyCommand(0).result() == 0
@@ -219,7 +215,7 @@ class TestCommandFallback(CleanupMixin):
     def test_failing_fallback(sefl):
         class MyCommand(Command):
             def run(self, value): return 10/value
-            def fallback(self, e): raise RuntimeError()
+            def fallback(self, value): raise RuntimeError()
 
         assert MyCommand(2).result() == 5
         assert isinstance(MyCommand(0).exception(), ZeroDivisionError)
@@ -253,7 +249,7 @@ class TestCommandCleanup(CleanupMixin):
         mutable = []
         class MyCommand(Command):
             def run(self): return 1/0
-            def fallback(self, e): return 5
+            def fallback(self): return 5
             def cleanup(self): mutable.append(None)
 
         assert not mutable
@@ -264,7 +260,7 @@ class TestCommandCleanup(CleanupMixin):
         mutable = []
         class MyCommand(Command):
             def run(self): return 1/0
-            def fallback(self, e): return 1/0
+            def fallback(self): return 1/0
             def cleanup(self): mutable.append(None)
 
         assert not mutable

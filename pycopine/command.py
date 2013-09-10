@@ -11,11 +11,11 @@ __all__ += ['CommandError', 'CommandSetupError', 'CommandTypeError',
 
 # Possible command states (for internal use only).
 NEW       = 'NEW'        # Initialized but not queued
-PENDING   = 'PENDING'    # Waiting for a spot in the thread pool
-RUNNING   = 'RUNNING'    # Running
-CANCELLED = 'CANCELLED'  # Stopped before run() finished
-FAILED    = 'FAILED'     # Stopped because of an exception in run()
-FINISHED  = 'FINISHED'   # Completed successfully
+PENDING   = 'PENDING'    # Waiting for a slot in the thread pool
+RUNNING   = 'RUNNING'    # Waiting for run() to return
+
+FAILED    = 'FAILED'     # Failed for some reason.
+SUCCEDED  = 'SUCCEDED'   # Completed successfully.
 
 
 class NotImplementedCallable(object):
@@ -124,8 +124,9 @@ class CommandMeta(type):
 
 
 class Command(object, metaclass=CommandMeta):
-    ''' Base class for all user defined commands. The base class implements the
-        (public) api of concurrent.futures.Future and adds some other methods.
+    ''' Abstract base class for all user defined commands. The base class
+        implements the (public) api of concurrent.futures.Future and adds some
+        other methods. Instances of this class are called "tasks".
 
         Subclasses MUST implement :meth:`run` and MAY implement :meth:`fallback`
         and/or :meth:`cleanup`. Additional methods or attributes should be
@@ -147,138 +148,153 @@ class Command(object, metaclass=CommandMeta):
         self.arguments = a, ka
 
         # This event is set if state changes to FINISHED, FAILED or CANCELLED
-        self._completed = threading.Event()
+        self.__completed = threading.Event()
 
         # The state is protected by a lock
-        self._statelock = threading.Lock()
-        self._state = NEW
+        self.__statelock = threading.Lock()
+        self.__state = NEW
+        self.__canceled = False
 
-        self._result = None
-        self._exception = None
+        self.__result = None
+        self.__exception = None
 
         # The fallback lock protects the fallback state, and ensures that
         # the fallback is only invoked once.
-        self._fallback_lock = threading.Lock()
-        self._fallback_state = NEW
-        self._fallback_result = None
-        self._fallback_exception = None
+        self.__fallback_state = NEW
+        self.__fallback_result = None
+        self.__fallback_exception = None
 
         self.__pool = None
 
     def submit(self):
-        ''' Queue the call for execution. '''
-        if self._state == CANCELLED:
-            raise CommandCancelledError("Submit on cancelled command.")
-        if self._state != NEW:
-            raise CommandIntegrityError("Submitted twice")
-        self._submit()
-        return self
-
-    def _submit(self):
-        with self._statelock:
-            if self._state == NEW:
-                self._state = PENDING
+        ''' Queue the task for execution. Submitting a task multiple times has
+            no effect. The return value is the task itself to allow chained
+            method calls.
+        '''
+        with self.__statelock:
+            if self.__state == NEW:
+                self.__state = PENDING
                 self.__pool = self.group.get_executor(self.pool)
                 self.__pool.enqueue(self)
         return self
 
     def cancel(self, exception=None):
-        ''' Stop the execution of the call (if possible) and wake up all
-            threads that are waiting for the result.
+        ''' Abandon an unfinished task and immediately wake up all threads
+            waiting for the result.
 
-            If the call is currently running and cannot be stopped, it is
-            still marked as cancelled and the result is thrown away.
+            NEW or PENDING tasks are marked as FAILED and removed from any pool.
+            RUNNING tasks are marked as FAILED and the result of the run()
+              method is ignored. An implementation of run() that checks for the
+              state at interruptible points may be able to exit early.
+            SUCCEDED or FAILED tasks are not affected. Calling cancel() on these
+              has no effect.
 
-            This is a no-op on completed or cancelled calls.
-
-            Return True if the command was cancelled before execution, false
-            otherwise.
+            Return True if the task was canceled in a NEW or PENDING state,
+              indicating that the run() method was not invoked.
         '''
-        with self._statelock:
-            if self._state in (NEW, PENDING, RUNNING):
-                self._exception = exception or CommandCancelledError()
-                self._state = CANCELLED
-                self._completed.set()
-            # Note that future.cancel() MUST be protected with statelock.
-            # to prevent _run() from being started in a CANCELLED state.
+        with self.__statelock:
+            if self.__state in (NEW, PENDING, RUNNING):
+                self.__exception = exception or CommandCancelledError()
+                self.__state = FAILED
+                self.__canceled = True
+                self.__completed.set()
             return self.__pool.dequeue(self) if self.__pool else True
 
-    def cancelled(self):
-        ''' Return True if the call was cancelled. '''
-        return self._state == CANCELLED
-
-    def running(self):
-        ''' Return True if the call is currently being executed. '''
-        return self._state == RUNNING
-
-    def completed(self):
-        ''' Return True if the call finished, failed or was cancelled. '''
-        return self._completed.is_set()
-
     def wait(self, timeout=None):
-        ''' Wait for the call to complete. Return True if the call completed
-            within timeout seconds.
-
-            This method does not cancel() the command after the timeout (as
-            result() with a timeout would do).
+        ''' Wait for the task to complete. Return True if the task completed
+            within timeout seconds regardless of the result, False otherwise.
         '''
-        self._submit()
-        return self._completed.wait(timeout)
+        return self.__completed.wait(timeout)
 
     def result(self, timeout=None):
-        ''' Submit the command and wait for the result.
+        ''' Submit the task and return the result as soon as it is available.
+            If the task fails or is canceled early, the fallback() value is
+            returned instead.
 
-            If run() fails with an exception and fallback() is defined, the
-            fallback() result is returned instead.
+            If fallback() is not defined, this method re-raises the exception
+            that originally caused the failure.
 
-            If fallback() is not defined or fails with an exception, this method
-            will raise the exception that was originally raised by run().
-
-            If a timeout is specified and the call takes longer than timeout
-            seconds, it will be cancelled with a CommandTimeoutError.
-
-            If the call runs into a timeout or is explicitly cancelled
-            from a differed thread, this method will immediately return the
-            fallback() value. If fallback() is not defined or fails
-            with an exception, CommandCancelledError or CommandTimeoutError will
-            be raised.
+            If no result is available within ``timeout`` seconds, the task is
+            canceled with a CommandTimeoutError. If you want to wait a limited
+            time but not cancel the task early, use wait() instead.
         '''
-        self._submit()
+        self.submit()
 
-        if self._state in (PENDING, RUNNING):
-            self._completed.wait(timeout)
+        if self.__state in (PENDING, RUNNING):
+            self.__completed.wait(timeout)
+            if self.__state in (PENDING, RUNNING):
+                self.cancel(CommandTimeoutError())
 
-        if self._state in (PENDING, RUNNING):
-            self.cancel(CommandTimeoutError())
+        if self.__state == SUCCEDED:
+            return self.__result
 
-        if self._state == FINISHED:
-            return self._result
-
-        with self._fallback_lock:
-            if self._fallback_state == NEW:
-                try:
-                    self._fallback_result = self.fallback(self._exception)
-                    self._fallback_state = FINISHED
-                except Exception as e:
-                    self._fallback_exception = e
-                    self._fallback_state = FAILED
-                    self.logger.exception('Fallback failed')
-
-        if self._fallback_state == FINISHED:
-            return self._fallback_result
+        if self.__try_fallback():
+            return self.__fallback_result
         else:
-            raise self._exception
+            raise self.__exception
 
     def exception(self, timeout=None):
-        if self.wait(timeout):
-            return self._exception
-        raise CommandTimeoutError()
+        if self.__completed.is_set():
+            return self.__exception
+
+        try:
+            self.result(timeout)
+        except Exception:
+            return self.__exception
+
+    def has_result(self):
+        ''' Returns True if a result is available. The next call to result()
+            will not block and not throw an exception. '''
+        return self.is_success() or self.is_fallback()
+
+    def is_success(self):
+        ''' Return True if the run() method completed successfully. '''
+        return self.__state == SUCCEDED
+
+    def is_failure(self):
+        ''' Return True if the run() method failed with an exception or someone
+            canceled the task early. '''
+        return self.__state == FAILED
+
+    def is_fallback(self):
+        ''' Return True if the result originated from the fallback routine. '''
+        return self.__fallback_state == SUCCEDED or self.__try_fallback()
+
+    def is_canceled(self):
+        ''' Return True if the command was canceled or timed out. '''
+        return self.__canceled
+
+    def is_timeout(self):
+        ''' Return True if the failure was caused by a timeout. '''
+        return isinstance(self.__exception, CommandTimeoutError)
+
+    def is_running(self):
+        return self.__state == RUNNING
+
+    def is_completed(self):
+        return self.__state in (SUCCEDED, FAILED)
+
+    def __try_fallback(self):
+        with self.__statelock:
+            if self.__state == FAILED and self.__fallback_state == NEW:
+                if self.fallback is NotImplementedMethod:
+                    self.__fallback_state = FAILED
+                else:
+                    try:
+                        a, ka = self.arguments
+                        self.__fallback_result = self.fallback(*a, **ka)
+                        self.__fallback_state = SUCCEDED
+                    except Exception as e:
+                        self.__fallback_exception = e
+                        self.__fallback_state = FAILED
+                        self.logger.exception('Fallback failed')
+            return self.__fallback_state == SUCCEDED
 
     def _run(self):
 
-        with self._statelock:
-            if self._state != PENDING: return
-            self._state = RUNNING
+        with self.__statelock:
+            if self.__state != PENDING: return
+            self.__state = RUNNING
 
         run_error, result = None, None
         try:
@@ -288,17 +304,17 @@ class Command(object, metaclass=CommandMeta):
             self.logger.exception("Command failed")
             run_error = e
 
-        with self._statelock:
-            if self._state == RUNNING:
+        with self.__statelock:
+            if self.__state == RUNNING:
                 if run_error:
-                    self._state = FAILED
-                    self._exception = run_error
+                    self.__state = FAILED
+                    self.__exception = run_error
                 else:
-                    self._state = FINISHED
-                    self._result = result
-                self._completed.set()
-            # Other possible states:
-            # CANCELLED: We ignore the result.
+                    self.__state = SUCCEDED
+                    self.__result = result
+                self.__completed.set()
+            elif self.__state == FAILED:
+                pass # Canceled while running
 
         try:
             self.cleanup()

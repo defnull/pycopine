@@ -33,12 +33,12 @@ Lets say we want to speak to a remote service that is slow, unreliable or both:
     import time
     import random
     
-    def crappy_service(input):
+    def crappy_service(value):
         ''' The most useless piece of code ever.'''
         time.sleep(5)
         if 'OK' != random.choice(['OK', 'OK', 'SERVER ON FIRE']):
             raise RuntimeError('We broke something :(')
-        return input
+        return value
 
 You could throw lots of threads and try/except clauses at the problem and hope
 to not break the internet. Or you could use pycopine:
@@ -50,26 +50,26 @@ to not break the internet. Or you could use pycopine:
     class MyCommand(Command):
         ''' Does nothing with the input, but with style. '''
     
-        def run(self, input):
-            return crappy_service(input)
+        def run(self, value):
+            return crappy_service(value)
 
-        def fallback(self, input):
+        def fallback(self, value):
             return 'some fallback value'
-    
+
     # Run and wait for the result
     result = MyCommand('input').result()
-    
+
     # Give up after 2 seconds
     result = MyCommand('input').result(timeout=2)
-    
+
     # Fire and forget
     MyCommand('input').submit()
-    
+
     # Do stuff in parallel
     foo = MyCommand('input').submit()
     bar = MyCommand('input').submit()
     results = [foo.result(), bar.result()]
-    
+
     # Change your mind midway through
     foobar = MyCommand('input').submit()
     if foobar.wait(timeout=2):
